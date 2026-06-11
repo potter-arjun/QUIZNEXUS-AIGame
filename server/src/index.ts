@@ -16,12 +16,23 @@ import { initializeSockets } from './services/socketService';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-// `true` reflects the request Origin back — works with credentials; '*' does not
-const corsOrigin: string | boolean = process.env.CLIENT_URL || true;
+const allowedOrigins: (string | RegExp)[] = [
+  /^http:\/\/localhost(:\d+)?$/,
+  /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+  /\.vercel\.app$/,
+];
+if (process.env.CLIENT_URL) allowedOrigins.push(process.env.CLIENT_URL);
 
 // Middleware Setup
 app.use(cors({
-  origin: corsOrigin,
+  origin: (origin, cb) => {
+    // allow non-browser requests (Postman, server-to-server) and matched origins
+    if (!origin || allowedOrigins.some(o => typeof o === 'string' ? o === origin : o.test(origin))) {
+      cb(null, true);
+    } else {
+      cb(new Error(`CORS blocked: ${origin}`));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -44,7 +55,13 @@ const server = http.createServer(app);
 // Socket.IO Setup
 const io = new Server(server, {
   cors: {
-    origin: corsOrigin,
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.some(o => typeof o === 'string' ? o === origin : o.test(origin))) {
+        cb(null, true);
+      } else {
+        cb(new Error(`CORS blocked: ${origin}`));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true
   }
