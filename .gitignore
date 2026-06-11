@@ -1,0 +1,27 @@
+# Environment files — never commit these
+.env
+.env.local
+.env.production
+.env.production.local
+
+# Node
+node_modules/
+
+# Build outputs
+server/dist/
+client/.next/
+client/out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma generated (regenerated on deploy)
+server/node_modules/
+
+# Vercel
+.vercel

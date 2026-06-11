@@ -1,0 +1,97 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String         @id @default(uuid())
+  username     String         @unique
+  email        String?        @unique
+  passwordHash String?        // Nullable for guest users
+  avatarUrl    String
+  coins        Int            @default(0)
+  xp           Int            @default(0)
+  level        Int            @default(1)
+  wins         Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  matchHistory     MatchHistory[]
+  achievements     UserAchievement[]
+  questionHistory  UserQuestionHistory[]
+  dailyEntries     DailyChallengeEntry[]
+}
+
+model UserQuestionHistory {
+  id           String   @id @default(uuid())
+  userId       String
+  questionHash String   // MD5 of question text — avoids storing full text
+  seenAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionHash])
+  @@index([userId])
+}
+
+model MatchHistory {
+  id               String   @id @default(uuid())
+  userId           String
+  roomCode         String
+  gameMode         String
+  score            Int
+  rank             Int
+  accuracy         Float    // percentage
+  avgResponseTime  Float    // in seconds
+  playedAt         DateTime @default(now())
+  
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserAchievement {
+  id              String   @id @default(uuid())
+  userId          String
+  achievementType String   // e.g. "FIRST_WIN", "TEN_WINS", "FASTEST_FINGER", "PERFECT_ACCURACY"
+  unlockedAt      DateTime @default(now())
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, achievementType])
+}
+
+model QuestionCache {
+  id            String   @id @default(uuid())
+  category      String
+  type          String
+  difficulty    String
+  language      String   // "EN", "HI", "BILINGUAL"
+  questionData  Json     // Matches the standard QUESTION FORMAT
+  createdAt     DateTime @default(now())
+}
+
+model DailyChallenge {
+  id        String   @id @default(uuid())
+  date      String   @unique  // "YYYY-MM-DD" UTC
+  questions Json     // Question[] with correctAnswer included
+  createdAt DateTime @default(now())
+  entries   DailyChallengeEntry[]
+}
+
+model DailyChallengeEntry {
+  id              String   @id @default(uuid())
+  userId          String
+  date            String
+  score           Int
+  accuracy        Float
+  avgResponseTime Float
+  completedAt     DateTime @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge DailyChallenge @relation(fields: [date], references: [date])
+
+  @@unique([userId, date])
+}

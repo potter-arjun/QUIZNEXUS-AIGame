@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: quiz-nexus-server
+    env: node
+    region: oregon
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false          # Set this in Render dashboard → your Neon connection string
+      - key: JWT_SECRET
+        sync: false          # Set a long random string in Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false          # Your Gemini API key
+      - key: CLIENT_URL
+        sync: false          # Your Vercel frontend URL e.g. https://quiz-nexus.vercel.app
