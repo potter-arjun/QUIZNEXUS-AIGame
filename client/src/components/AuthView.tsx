@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import AvatarSelector from './AvatarSelector';
-import { Sparkles, Zap, LogIn, UserPlus, Play, Brain, Trophy, Users, Flame } from 'lucide-react';
+import { Sparkles, Zap, LogIn, UserPlus, Play, Brain, Trophy, Users, Flame, Eye, EyeOff } from 'lucide-react';
 
 // Seeded random-ish positions for SSR safety (no Math.random on render)
 const PARTICLE_CONFIG = [
@@ -45,8 +45,33 @@ export const AuthView: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [avatarId, setAvatarId] = useState('avatar_1');
+  const [showPassword, setShowPassword] = useState(false);
+  const [forgotView, setForgotView] = useState<'none' | 'form' | 'sent'>('none');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:5000';
+
+  const handleForgot = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${SERVER_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+      setForgotView('sent');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
@@ -211,7 +236,58 @@ export const AuthView: React.FC = () => {
             </div>
           )}
 
+          {/* ── Forgot-password overlay ── */}
+          {activeTab === 'login' && forgotView !== 'none' && (
+            <div className="space-y-4">
+              {forgotView === 'sent' ? (
+                <div className="text-center py-4 space-y-3">
+                  <div className="text-3xl">📬</div>
+                  <p className="text-zinc-200 text-sm font-bold">Check your email</p>
+                  <p className="text-zinc-500 text-xs">If that address is registered you'll receive a reset link shortly. Check spam if it doesn't arrive.</p>
+                  <button
+                    type="button"
+                    onClick={() => { setForgotView('none'); setForgotEmail(''); setError(null); }}
+                    className="text-purple-400 hover:text-purple-300 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    ← Back to login
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgot} className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase block mb-1.5">Your email</label>
+                    <input
+                      type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                      placeholder="you@example.com" required autoFocus
+                      className="w-full px-4 py-3 rounded-xl text-zinc-200 placeholder-zinc-600 transition-all outline-none"
+                      style={{ background: 'rgba(24,20,48,0.8)', border: '1px solid rgba(63,54,120,0.5)' }}
+                      onFocus={e => (e.target.style.borderColor = 'rgba(139,92,246,0.7)')}
+                      onBlur={e => (e.target.style.borderColor = 'rgba(63,54,120,0.5)')}
+                    />
+                  </div>
+                  <button
+                    type="submit" disabled={forgotLoading}
+                    className="w-full py-3.5 rounded-xl font-black text-sm text-white shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer uppercase tracking-widest"
+                    style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)', boxShadow: '0 8px 32px rgba(124,58,237,0.3)' }}
+                  >
+                    {forgotLoading ? <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Send reset link'}
+                  </button>
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => { setForgotView('none'); setError(null); }}
+                      className="text-zinc-500 hover:text-zinc-300 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      ← Back to login
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
           {/* Form */}
+          {(activeTab !== 'login' || forgotView === 'none') && (
           <form onSubmit={handleSubmit} className="space-y-4">
             {activeTab !== 'login' && (
               <div>
@@ -242,14 +318,35 @@ export const AuthView: React.FC = () => {
             {activeTab !== 'guest' && (
               <div>
                 <label className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase block mb-1.5">Password</label>
-                <input
-                  type="password" value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••" required
-                  className="w-full px-4 py-3 rounded-xl text-zinc-200 placeholder-zinc-600 transition-all outline-none"
-                  style={{ background: 'rgba(24,20,48,0.8)', border: '1px solid rgba(63,54,120,0.5)' }}
-                  onFocus={e => (e.target.style.borderColor = 'rgba(139,92,246,0.7)')}
-                  onBlur={e => (e.target.style.borderColor = 'rgba(63,54,120,0.5)')}
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••" required
+                    className="w-full px-4 py-3 pr-11 rounded-xl text-zinc-200 placeholder-zinc-600 transition-all outline-none"
+                    style={{ background: 'rgba(24,20,48,0.8)', border: '1px solid rgba(63,54,120,0.5)' }}
+                    onFocus={e => (e.target.style.borderColor = 'rgba(139,92,246,0.7)')}
+                    onBlur={e => (e.target.style.borderColor = 'rgba(63,54,120,0.5)')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {activeTab === 'login' && (
+                  <div className="text-right mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setForgotView('form'); setForgotEmail(email); setError(null); }}
+                      className="text-xs text-zinc-500 hover:text-purple-400 transition-colors cursor-pointer font-medium"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {activeTab !== 'login' && (
@@ -276,6 +373,7 @@ export const AuthView: React.FC = () => {
               )}
             </button>
           </form>
+          )}
 
           {/* Mobile stats */}
           <div className="lg:hidden flex items-center justify-center gap-6 mt-8 pt-6" style={{ borderTop: '1px solid rgba(63,54,120,0.3)' }}>

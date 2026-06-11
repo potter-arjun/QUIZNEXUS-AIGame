@@ -16,7 +16,8 @@ import { initializeSockets } from './services/socketService';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const corsOrigin = process.env.CLIENT_URL || '*';
+// `true` reflects the request Origin back — works with credentials; '*' does not
+const corsOrigin: string | boolean = process.env.CLIENT_URL || true;
 
 // Middleware Setup
 app.use(cors({

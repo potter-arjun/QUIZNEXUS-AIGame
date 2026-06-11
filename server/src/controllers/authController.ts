@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../config/db';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev-navodaya-quiz';
@@ -139,6 +140,60 @@ export const authController = {
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || "Guest signup failed." });
+    }
+  },
+
+  async forgotPassword(req: Request, res: Response) {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+    try {
+      const user = await prisma.user.findUnique({ where: { email } });
+
+      // Always respond with the same message — avoids email enumeration
+      if (!user || !user.passwordHash) {
+        return res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetToken: token, resetExpiry: expiry }
+      });
+
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+      const resetUrl = `${clientUrl}/reset-password?token=${token}`;
+      console.log(`[AUTH] Password reset link for ${email}: ${resetUrl}`);
+
+      return res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Something went wrong.' });
+    }
+  },
+
+  async resetPassword(req: Request, res: Response) {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password are required.' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+    try {
+      const user = await prisma.user.findFirst({
+        where: { resetToken: token, resetExpiry: { gt: new Date() } }
+      });
+
+      if (!user) return res.status(400).json({ error: 'Invalid or expired reset link.' });
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash, resetToken: null, resetExpiry: null }
+      });
+
+      return res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Reset failed.' });
     }
   }
 };
