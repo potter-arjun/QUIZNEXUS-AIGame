@@ -616,7 +616,7 @@ Return ONLY a valid JSON object — no markdown, no code blocks:
 
           try {
             const result = await getGenClient()
-              .getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
+              .getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
               .generateContent(topicPrompt);
             const txt = result.response.text().trim();
             if (txt) {
@@ -638,7 +638,7 @@ Return ONLY a valid JSON object — no markdown, no code blocks:
               console.warn('[AI] 🔴 Quota exhausted during custom topic generation');
             } else if (status === 400 || status === 401 || status === 403 || status === 404) {
               geminiQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000;
-              console.warn(`[AI] 🔴 Gemini key invalid/expired (HTTP ${status}) — update GEMINI_API_KEY`);
+              console.warn(`[AI] 🔴 Gemini error (HTTP ${status}) — ${err?.message || err?.statusText || 'no message'} — update GEMINI_API_KEY`);
             } else {
               console.warn('[AI] ❌ Custom topic Gemini failed:', err?.message);
             }
@@ -724,7 +724,7 @@ Return ONLY a valid JSON object — no markdown, no code blocks, no extra text:
 
         try {
           const result = await getGenClient()
-            .getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
+            .getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
             .generateContent(promptText);
           const jsonText = result.response.text().trim();
           if (!jsonText) {
@@ -755,7 +755,7 @@ Return ONLY a valid JSON object — no markdown, no code blocks, no extra text:
           } else if (status === 400 || status === 401 || status === 403 || status === 404) {
             geminiQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000;
             gemini500Count = 0;
-            console.warn(`[AI] 🔴 Gemini key invalid/expired (HTTP ${status}) — update GEMINI_API_KEY in .env`);
+            console.warn(`[AI] 🔴 Gemini error (HTTP ${status}) — ${err?.message || err?.statusText || 'no message'} — update GEMINI_API_KEY in .env`);
           } else if (status === 500 || status === 503) {
             gemini500Count++;
             if (gemini500Count >= 2) {
