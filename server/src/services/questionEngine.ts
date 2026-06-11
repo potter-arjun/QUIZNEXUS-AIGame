@@ -1,4 +1,15 @@
 import { generateFigureQuestion } from './svgGenerator';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Singleton client — mirrors Python's _get_gen_client()
+let _genClient: GoogleGenerativeAI | null = null;
+
+function getGenClient(): GoogleGenerativeAI {
+  if (!_genClient) {
+    _genClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+  }
+  return _genClient;
+}
 
 export interface Question {
   question: string;
@@ -576,8 +587,7 @@ export async function generateQuestion(
     if (topicApiKey?.trim() && !topicBlocked) {
       await geminiRateLimit();
       if (Date.now() > geminiQuotaExhaustedUntil && Date.now() > gemini500BackoffUntil) {
-        try {
-          const langNote = language === 'hi'
+        const langNote = language === 'hi'
             ? 'Write the question and all options in Hindi only.'
             : language === 'bilingual'
             ? 'Write the question and options in both Hindi and English (bilingual format).'
@@ -604,57 +614,37 @@ Return ONLY a valid JSON object — no markdown, no code blocks:
   "explanation": "Brief explanation of why the answer is correct."
 }`;
 
-          const ctrl = new AbortController();
-          const tid = setTimeout(() => ctrl.abort(), 8000);
-          let resp: Response;
           try {
-            resp = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${topicApiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: topicPrompt }] }],
-                  generationConfig: { responseMimeType: 'application/json', temperature: 0.9 }
-                }),
-                signal: ctrl.signal
-              }
-            );
-          } finally {
-            clearTimeout(tid);
-          }
-
-          if (resp.ok) {
-            const raw = await resp.text();
-            let dat: any;
-            try { dat = JSON.parse(raw); } catch {}
-            if (dat) {
-              const txt = dat.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (txt) {
-                try {
-                  const p = JSON.parse(txt.trim());
-                  if (p.question && Array.isArray(p.options) && p.options.length === 4 && p.correctAnswer) {
-                    gemini500Count = 0;
-                    console.log(`[AI] ✅ Custom topic "${customTopic}" → "${p.question.slice(0, 60)}"`);
-                    return {
-                      question: p.question, type: p.type || customTopic, difficulty,
-                      options: p.options, correctAnswer: p.correctAnswer as 'A' | 'B' | 'C' | 'D',
-                      explanation: p.explanation || '', category: customTopic
-                    };
-                  }
-                } catch {}
+            const result = await getGenClient()
+              .getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
+              .generateContent(topicPrompt);
+            const txt = result.response.text().trim();
+            if (txt) {
+              const p = JSON.parse(txt);
+              if (p.question && Array.isArray(p.options) && p.options.length === 4 && p.correctAnswer) {
+                gemini500Count = 0;
+                console.log(`[AI] ✅ Custom topic "${customTopic}" → "${p.question.slice(0, 60)}"`);
+                return {
+                  question: p.question, type: p.type || customTopic, difficulty,
+                  options: p.options, correctAnswer: p.correctAnswer as 'A' | 'B' | 'C' | 'D',
+                  explanation: p.explanation || '', category: customTopic
+                };
               }
             }
-          } else if (resp.status === 429) {
-            geminiQuotaExhaustedUntil = Date.now() + 60 * 60 * 1000;
-            console.warn('[AI] 🔴 Quota exhausted during custom topic generation');
+          } catch (err: any) {
+            const status = (err as any)?.status ?? 0;
+            if (status === 429) {
+              geminiQuotaExhaustedUntil = Date.now() + 60 * 60 * 1000;
+              console.warn('[AI] 🔴 Quota exhausted during custom topic generation');
+            } else if (status === 400 || status === 401 || status === 403 || status === 404) {
+              geminiQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000;
+              console.warn(`[AI] 🔴 Gemini key invalid/expired (HTTP ${status}) — update GEMINI_API_KEY`);
+            } else {
+              console.warn('[AI] ❌ Custom topic Gemini failed:', err?.message);
+            }
           }
-        } catch (err: any) {
-          if (err?.name === 'AbortError') console.warn('[AI] ⏱ Gemini timeout for custom topic');
-          else console.warn('[AI] ❌ Custom topic Gemini failed:', err?.message);
-        }
-      }
-    }
+      } // end if not blocked
+    } // end if apiKey
     // Gemini unavailable — fall back to GK bank so the game isn't blocked
     console.log(`[LOCAL] Custom topic fallback for "${customTopic}" — using GK bank`);
     return pickFromPool(LOCAL_GK_QUESTIONS as QItem[], customTopic, difficulty);
@@ -692,8 +682,7 @@ Return ONLY a valid JSON object — no markdown, no code blocks:
     // Recheck after wait — a concurrent call may have tripped a breaker while we waited
     if (Date.now() > geminiQuotaExhaustedUntil && Date.now() > gemini500BackoffUntil) {
       console.log(`[AI] Requesting Gemini question — category: ${activeCategory}, difficulty: ${difficulty}`);
-      try {
-        const categoryGuide: Record<string, string> = {
+      const categoryGuide: Record<string, string> = {
           'Mental Ability':              'logical reasoning — number series, letter series, analogies, coding-decoding, odd-one-out',
           'Mathematics':                 'arithmetic — percentages, averages, fractions, LCM/HCF, ratios, simple algebra',
           'General Knowledge':           'world history, geography, science basics, famous inventions, Indian GK',
@@ -733,92 +722,62 @@ Return ONLY a valid JSON object — no markdown, no code blocks, no extra text:
   "explanation": "Brief explanation of why the answer is correct."
 }`;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        let response: Response;
         try {
-          response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { responseMimeType: 'application/json', temperature: 0.9 }
-              }),
-              signal: controller.signal
+          const result = await getGenClient()
+            .getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } })
+            .generateContent(promptText);
+          const jsonText = result.response.text().trim();
+          if (!jsonText) {
+            console.warn('[AI] ⚠️  No text in Gemini response');
+          } else {
+            const parsed = JSON.parse(jsonText);
+            if (parsed.question && Array.isArray(parsed.options) && parsed.options.length === 4 && parsed.correctAnswer) {
+              gemini500Count = 0;
+              console.log(`[AI] ✅ Gemini answered — "${parsed.question.slice(0, 70)}"`);
+              return {
+                question: parsed.question,
+                type: parsed.type || activeCategory,
+                difficulty,
+                options: parsed.options,
+                correctAnswer: parsed.correctAnswer as 'A' | 'B' | 'C' | 'D',
+                explanation: parsed.explanation || '',
+                category: activeCategory
+              };
             }
-          );
-        } finally {
-          clearTimeout(timeoutId);
-        }
-
-        const rawBody = await response.text();
-        if (!response.ok) {
-          if (response.status === 429) {
+            console.warn('[AI] ⚠️  Parsed JSON missing fields:', JSON.stringify(parsed).slice(0, 200));
+          }
+        } catch (err: any) {
+          const status = (err as any)?.status ?? 0;
+          if (status === 429) {
             geminiQuotaExhaustedUntil = Date.now() + 60 * 60 * 1000;
             gemini500Count = 0;
             console.warn('[AI] 🔴 Gemini quota exhausted — using local questions for 1 hour');
-          } else if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
+          } else if (status === 400 || status === 401 || status === 403 || status === 404) {
             geminiQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000;
             gemini500Count = 0;
-            console.warn(`[AI] 🔴 Gemini key invalid/expired (HTTP ${response.status}) — update GEMINI_API_KEY in .env`);
-          } else if (response.status === 500 || response.status === 503) {
+            console.warn(`[AI] 🔴 Gemini key invalid/expired (HTTP ${status}) — update GEMINI_API_KEY in .env`);
+          } else if (status === 500 || status === 503) {
             gemini500Count++;
             if (gemini500Count >= 2) {
-              gemini500BackoffUntil = Date.now() + 5 * 60 * 1000; // 5-minute pause
+              gemini500BackoffUntil = Date.now() + 5 * 60 * 1000;
               gemini500Count = 0;
-              console.warn(`[AI] 🟡 Gemini server error repeated — pausing AI for 5 minutes, using local questions`);
+              console.warn('[AI] 🟡 Gemini server error repeated — pausing AI for 5 minutes');
             } else {
-              console.warn(`[AI] ⚠️  Gemini HTTP ${response.status} (${gemini500Count}/2) — falling back to local`);
+              console.warn(`[AI] ⚠️  Gemini HTTP ${status} (${gemini500Count}/2) — falling back to local`);
             }
           } else {
-            console.warn(`[AI] ⚠️  Gemini HTTP ${response.status} — ${rawBody.slice(0, 200)}`);
-          }
-        } else {
-          let data: any;
-          try { data = JSON.parse(rawBody); } catch { console.warn('[AI] ⚠️  Gemini body is not JSON:', rawBody.slice(0, 200)); }
-          if (data) {
-            const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!jsonText) {
-              console.warn('[AI] ⚠️  No text in Gemini candidates:', JSON.stringify(data).slice(0, 300));
+            gemini500Count++;
+            if (gemini500Count >= 2) {
+              gemini500BackoffUntil = Date.now() + 5 * 60 * 1000;
+              gemini500Count = 0;
+              console.warn('[AI] 🟡 Gemini unreachable — pausing AI for 5 minutes');
             } else {
-              try {
-                const parsed = JSON.parse(jsonText.trim());
-                if (parsed.question && Array.isArray(parsed.options) && parsed.options.length === 4 && parsed.correctAnswer) {
-                  gemini500Count = 0; // reset on success
-                  console.log(`[AI] ✅ Gemini answered — "${parsed.question.slice(0, 70)}"`);
-                  return {
-                    question: parsed.question,
-                    type: parsed.type || activeCategory,
-                    difficulty,
-                    options: parsed.options,
-                    correctAnswer: parsed.correctAnswer as 'A' | 'B' | 'C' | 'D',
-                    explanation: parsed.explanation || '',
-                    category: activeCategory
-                  };
-                }
-                console.warn('[AI] ⚠️  Parsed JSON missing fields:', JSON.stringify(parsed).slice(0, 200));
-              } catch {
-                console.warn('[AI] ⚠️  Failed to parse Gemini text as JSON:', jsonText.slice(0, 200));
-              }
+              console.warn('[AI] ❌ Gemini call failed — using local fallback:', err?.message);
             }
           }
         }
-      } catch (err: any) {
-        gemini500Count++;
-        if (gemini500Count >= 2) {
-          gemini500BackoffUntil = Date.now() + 5 * 60 * 1000;
-          gemini500Count = 0;
-          console.warn('[AI] 🟡 Gemini unreachable — pausing AI for 5 minutes, using local questions');
-        } else if (err?.name === 'AbortError') {
-          console.warn('[AI] ⏱ Gemini timeout (5s) — falling back to local question');
-        } else {
-          console.warn(`[AI] ❌ Gemini call failed — using local fallback:`, err?.message);
-        }
-      }
-    }
-  }
+    } // end if not quota-blocked
+  } // end if apiKey
 
   // Local fallback generators
   console.log(`[LOCAL] Using local question bank — category: ${activeCategory}`);
